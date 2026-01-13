@@ -45,7 +45,7 @@ The results indicate that Random Forest classifiers significantly outperform lin
 -Context-Aware Models: Exploring 2-step classification approaches where exercise is first detected before identifying the specific activity type.
 
 # Setup and Usage
-- Download `dataset2.csv` from the [Kaggle data source](https://www.kaggle.com/datasets/diegosilvadefrana/fisical-activity-dataset/data).
+- Download `dataset2.csv` from the [Kaggle data source](https://www.kaggle.com/datasets/diegosilvadefrana/fisical-activity-dataset/data) made publicly available thanks to Diego Silva.
 -  Ensure the CSV is located in the project root directory.
 - Open `activity_classification.Rmd` in RStudio and knit to HTML.
 
