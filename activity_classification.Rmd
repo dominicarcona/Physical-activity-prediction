@@ -86,10 +86,7 @@ df <- df %>%
 mutate(body_temp =
 (chest.temperature...C. +
 hand.temperature...C. +
-ankle.temperature...C.) / 3) %>%
-select(-chest.temperature...C.,
--hand.temperature...C.,
--ankle.temperature...C.)
+ankle.temperature...C.) / 3)
 ```
 
 ## Box Plots
@@ -110,13 +107,17 @@ Participants' heart rates vary widely even within activities, but scaled_hr shou
 We evaluate models using a random train–test split with fixed sample size. This choice reflects our goal of assessing instantaneous activity separability rather than temporal or subject-level generalization. Random sampling preserves the activity distribution and class imbalance while providing large, representative training and test sets. A fixed sample size ensures computational tractability and fair comparison across models. All splits are generated with a fixed random seed to ensure reproducibility.
 
 ```{r traintest, echo=FALSE}
+## Train / Test Split
 df$activityID <- as.factor(df$activityID)
 
 n <- 200000
 idx <- sample(nrow(df), n)
 
-train <- df[idx, ] %>% select(-PeopleId)
-test  <- df[-idx, ] %>% sample_n(n) %>% select(-PeopleId)
+# Explicitly exclude individual sensors here so they don't enter the global models
+excluded_vars <- c("PeopleId", "chest.temperature...C.", "hand.temperature...C.", "ankle.temperature...C.")
+
+train <- df[idx, ] %>% select(-all_of(excluded_vars))
+test  <- df[-idx, ] %>% sample_n(n) %>% select(-all_of(excluded_vars))
 ```
 
 ### Handling Class Imbalance
