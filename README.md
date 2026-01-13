@@ -36,7 +36,7 @@ The dataset comprises over 2.86 million observations from 8 participants. To ens
 # Findings and Future Work
 The results indicate that Random Forest classifiers significantly outperform linear models in this domain due to their ability to handle non-linear activity clusters in the predictor space. Furthermore, the study suggests that single-sensor placement on the wrist or chest provides nearly equivalent performance to multi-sensor configurations, which has significant implications for the development of consumer-facing health technology.
 
-# Future iterations of this research could focus on:
+## Future iterations of this research could focus on:
 
 -Temporal Smoothing: Implementing Hidden Markov Models (HMM) or similar sequences to account for the temporal continuity of human movement.
 
@@ -49,4 +49,5 @@ The results indicate that Random Forest classifiers significantly outperform lin
 
 -dataset2.csv: The base dataset (requires download from Kaggle/UCI repository).
 
-Author: Dominic Arcona Date: December 2023
+### Author: Dominic Arcona 
+### Date: December 2023
