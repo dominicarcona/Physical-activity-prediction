@@ -1,5 +1,5 @@
 # Physical Activity Prediction from Wearable Sensors
-This repository contains a comprehensive machine learning analysis of the PAMAP2 Physical Activity Monitoring dataset. The project focuses on the classification of 13 unique physical activities using high-frequency heart rate and inertial measurement unit (IMU) data collected from multiple body locations. Originally a MATH 550 (Seminar in Statistical Consulting) project at USC - presentation slides are included in this repository.
+Originally a MATH 550 (Seminar in Statistical Consulting) project at USC, this repository contains a comprehensive machine learning analysis of the PAMAP2 Physical Activity Monitoring dataset in R. The project focuses on the classification of 13 unique physical activities using high-frequency heart rate and inertial measurement unit (IMU) data collected from multiple body locations. Results of the analysis can be digested via the .html knit (activity_classification.html) or the presentation slides ('M550 PAP.pptx') included in this repository.
 
 # Executive Summary
 The primary objective of this study was to evaluate the predictive performance of various classification architectures in identifying specific physical activities from raw sensor streams. By comparing Multinomial Logistic Regression and Random Forest ensembles, the analysis demonstrates that tree-based models effectively capture the non-linear boundaries inherent in physiological and motion data, achieving a classification accuracy of 97.2%. Additionally, the project investigates the trade-offs between multi-sensor arrays and single-sensor configurations for consumer wearable applications.
@@ -44,10 +44,10 @@ The results indicate that Random Forest classifiers significantly outperform lin
 
 -Context-Aware Models: Exploring 2-step classification approaches where exercise is first detected before identifying the specific activity type.
 
-# Repository Structure
--activity_classification.Rmd: The primary R Markdown file containing the analysis pipeline.
-
--dataset2.csv: The base dataset (requires download from Kaggle/UCI repository).
+# Setup and Usage
+- Download `dataset2.csv` from the [Kaggle data source](https://www.kaggle.com/datasets/diegosilvadefrana/fisical-activity-dataset/data).
+-  Ensure the CSV is located in the project root directory.
+- Open `activity_classification.Rmd` in RStudio and knit to HTML.
 
 ### Author: Dominic Arcona 
 ### Date: December 2023
