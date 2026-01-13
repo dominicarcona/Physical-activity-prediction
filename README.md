@@ -4,7 +4,7 @@ This repository contains a comprehensive machine learning analysis of the PAMAP2
 # Executive Summary
 The primary objective of this study was to evaluate the predictive performance of various classification architectures in identifying specific physical activities from raw sensor streams. By comparing Multinomial Logistic Regression and Random Forest ensembles, the analysis demonstrates that tree-based models effectively capture the non-linear boundaries inherent in physiological and motion data, achieving a classification accuracy of 97.2%. Additionally, the project investigates the trade-offs between multi-sensor arrays and single-sensor configurations for consumer wearable applications.
 
-# Key Performance Indicators
+# Model Performance Summary
 -Baseline Random Forest: 97.2% Accuracy across 13 activity classes.
 
 -Reduced Feature Random Forest: 93.8% Accuracy using only 3 key predictors (Scaled Heart Rate, Chest Z-Axis Acceleration, and Body Temperature).
