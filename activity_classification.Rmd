@@ -1,0 +1,377 @@
+---
+title: "Physical Activity Prediction from Wearable Sensors"
+author: "Dominic Arcona"
+date: "2023-12-01"
+output:
+  html_document:
+    df_print: paged
+extra_dependencies: amsmath
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+set.seed(1)
+```
+
+### Introduction
+Wearable sensors are increasingly used to monitor health and physical activity.
+This project investigates whether inertial and physiological signals collected
+from wearable devices can accurately classify physical activities.
+
+## Goals
+- Predict 13 physical activity classes from wearable sensor data
+- Compare multiple classification models
+- Evaluate feature importance
+- Assess how predictive performance changes when using sensors from only one body location
+
+## Data
+The PAMAP2 dataset [Reiss, A. (2012). PAMAP2 Physical Activity Monitoring [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5NW2H.] is the base data source. Diego Silva compiled the data into a CSV file available for download at https://www.kaggle.com/datasets/diegosilvadefrana/fisical-activity-dataset/data. We dowloaded and stored 'dataset2.csv' in the project root. The dataset contains observations from 8 participants in a 2012 study. Heart rate and inertial data was collected several times per second over the course of about 3600 seconds per participant. The total number of observations in the dataset is over 2.86 million. There are 31 predictors available plus the response variable and a PeopleID. The predictors include variables such as heart rate, temperature, and inertial measurements recorded at the chest, wrist, and ankle. The response variable is the type of activity being performed. There are 13 unique responses including 'transient activity', which is intended to capture states in which none of the other 12 physical activities are being performed.
+
+### Import Libraries and Data
+
+```{r initialize, include=FALSE}
+library(tidyverse)
+library(zoo)
+library(caret)
+library(randomForest)
+library(gbm)
+library(yardstick)
+library(pROC)
+library(corrplot)
+library(nnet)
+
+# Expect dataset2.csv to live in project root
+
+x <- read.csv('dataset2.csv')
+
+# Interpolate missing heart rate values
+
+x$heart_rate <- na.approx(x$heart_rate)
+```
+
+### Exploratory Analysis
+
+```{r explore, echo=FALSE}
+corrplot(cor(x[ , -1]), type = "lower", tl.cex = 0.4)
+```
+
+Strong correlations appear among temperature sensors and between
+accelerometer–magnetometer pairs at the same body location.
+
+### Feature Engineering
+
+## Scaled Heart Rate
+
+First, we want to scale our heart_rate feature to account for the fact that different people have different max heart rates and different levels of fitness that may cause their heart rates to differ significantly when they are performing the same task. 
+
+```{r fe1, echo=FALSE}
+df <- as_tibble(x)
+
+max_hr <- df %>%
+group_by(PeopleId) %>%
+summarise(max_hr = max(heart_rate))
+
+df <- df %>%
+left_join(max_hr, by = "PeopleId") %>%
+mutate(scaled_hr = heart_rate / max_hr) %>%
+select(-heart_rate, -max_hr)
+```
+
+## Body Temperature
+
+Since the body part temperature variables are strongly correlated, we will combine these into a single body_temperature variable.
+
+```{r fe2, echo=FALSE}
+df <- df %>%
+mutate(body_temp =
+(chest.temperature...C. +
+hand.temperature...C. +
+ankle.temperature...C.) / 3) %>%
+select(-chest.temperature...C.,
+-hand.temperature...C.,
+-ankle.temperature...C.)
+```
+
+## Box Plots
+
+```{r v1, echo=FALSE}
+activity <- as.factor(df$activityID)
+plot(activity, df$scaled_hr, las=2, cex.axis=.5, ylab="scaled_hr", xlab="")
+```
+
+```{r v3, echo=FALSE}
+plot(activity, df$body_temp, las=2, cex.axis=.5, ylab="body_temp", xlab="")
+```
+
+Participants' heart rates vary widely even within activities, but scaled_hr should still be a strong predictive variable. We expect body_temp to also be strongly predictive, and are pleasantly surprised to see that it is not highly correlated with heart rate. Notice 'rope jumping' as an example of an activity associated with very high heart rate, but low body temperature. This could be an indication that intense activity like jumping interferes with temperature sensor function, but it is nonetheless useful for activity classification.
+
+### Train / Test Split
+
+We evaluate models using a random train–test split with fixed sample size. This choice reflects our goal of assessing instantaneous activity separability rather than temporal or subject-level generalization. Random sampling preserves the activity distribution and class imbalance while providing large, representative training and test sets. A fixed sample size ensures computational tractability and fair comparison across models. All splits are generated with a fixed random seed to ensure reproducibility.
+
+```{r traintest, echo=FALSE}
+df$activityID <- as.factor(df$activityID)
+
+n <- 200000
+idx <- sample(nrow(df), n)
+
+train <- df[idx, ] %>% select(-PeopleId)
+test  <- df[-idx, ] %>% sample_n(n) %>% select(-PeopleId)
+```
+
+### Handling Class Imbalance
+
+Rebalancing class weights will help our models assign more equal importance to different classes regardless of their rate of occurrence in the data.
+
+```{r classweights, echo=FALSE}
+class_weights <- train %>%
+count(activityID) %>%
+mutate(weight = sum(n) / (length(n) * n)) %>%
+deframe()
+```
+
+### Multinomial Logistic Regression 
+
+Here we notice that the runtime is a bit excessive, so we constrain our model to use the 3 most powerful predictors (previously determined through separate analysis).
+
+```{r logit, echo=FALSE}
+logit_weights <- class_weights[train$activityID]
+
+logit_fit <- multinom(
+activityID ~ scaled_hr + chest.acceleration.Z..16g + body_temp,
+data = train,
+weights = logit_weights,
+MaxNWts = 10000
+)
+
+logit_pred <- predict(logit_fit, test)
+confusionMatrix(logit_pred, test$activityID)
+```
+
+The results are not too impressive. Even with the provided class weights, the model mostly predicts 'transient activities'.
+
+### Random Forest Classifier
+
+Let's train a random forest classifier next.
+
+```{r rf1, echo=FALSE}
+rf_baseline <- randomForest(
+activityID ~ .,
+data = train,
+ntree = 100,
+importance = TRUE,
+classwt = class_weights
+)
+
+baseline_pred <- predict(rf_baseline, test)
+baseline_cm <- confusionMatrix(baseline_pred, test$activityID)
+baseline_cm
+```
+
+```{r rfimp, echo=FALSE}
+varImpPlot(rf_baseline, cex = 0.6)
+```
+
+With accuracy over 97%, this model baseline model is quite impressive.
+
+### Reduced Feature Random Forest
+
+For a more fair comparison with the multinomial logistic regression model, let's train a random forest classifier on the same 3 predictors.
+
+```{r rf2, echo=FALSE}
+rf_small <- randomForest(
+activityID ~ scaled_hr + chest.acceleration.Z..16g + body_temp,
+data = train,
+ntree = 100,
+classwt = class_weights
+)
+
+rf_small_pred <- predict(rf_small, test)
+confusionMatrix(rf_small_pred, test$activityID)
+```
+
+The overall accuracy of 93.8% is very impressive compared to the logit model. We hypothesize that different activity regions in the predictor space cannot be linearly separated but can be separated reasonably well using decision trees.
+
+### Exercise vs. Non-Exercise Classification
+
+## Activity Regrouping
+
+```{r regroup, echo=FALSE}
+df_rg <- df %>%
+mutate(
+activityID = case_when(
+activityID %in% c("ascending stairs", "descending stairs") ~ "stair climbing",
+activityID %in% c("ironing", "vacuum cleaning", "lying",
+"sitting", "standing") ~ "transient activities",
+TRUE ~ as.character(activityID)
+)
+)
+
+df_rg$activityID <- as.factor(df_rg$activityID)
+```
+
+### Random Forest Classifcation on Re-grouped Activities
+
+```{r regrouprf, echo=FALSE}
+idx <- sample(nrow(df_rg), n)
+
+train_rg <- df_rg[idx, ] %>% select(-PeopleId)
+test_rg  <- df_rg[-idx, ] %>% sample_n(n) %>% select(-PeopleId)
+
+class_weights_rg <- train_rg %>%
+count(activityID) %>%
+mutate(weight = sum(n) / (length(n) * n)) %>%
+deframe()
+
+rf_rg <- randomForest(
+activityID ~ .,
+data = train_rg,
+ntree = 100,
+classwt = class_weights_rg
+)
+
+rg_pred <- predict(rf_rg, test_rg)
+rg_cm <- confusionMatrix(rg_pred, test_rg$activityID)
+rg_cm
+```
+
+### Comparison to full multiclass random forest
+
+```{r comparemodels, echo=FALSE}
+data.frame(
+Model = c("Original Labels", "Re-grouped Labels"),
+Accuracy = c(baseline_cm$overall["Accuracy"],
+rg_cm$overall["Accuracy"])
+)
+
+baseline_recall <- baseline_cm$byClass[, "Sensitivity"]
+rg_recall <- rg_cm$byClass[, "Sensitivity"]
+
+list(
+Baseline_Recall = baseline_recall,
+Regrouped_Recall = rg_recall
+)
+```
+
+### Binary Exercise vs. Non-Exercise Classification
+
+Let's train a model that simply predicts whether or not a wearer is engaged in deliberate exercise. 
+
+```{r rf3, echo=FALSE}
+df_bin <- df_rg %>%
+mutate(
+Exercise = if_else(
+activityID %in% c("cycling", "running", "walking",
+"Nordic walking", "rope jumping", "stair climbing"),
+"yes", "no"
+)
+) %>%
+select(-activityID)
+
+df_bin$Exercise <- as.factor(df_bin$Exercise)
+
+idx <- sample(nrow(df_bin), n)
+
+train_bin <- df_bin[idx, ] %>% select(-PeopleId)
+test_bin  <- df_bin[-idx, ] %>% sample_n(n) %>% select(-PeopleId)
+
+#binary class weights
+bin_weights <- train_bin %>%
+count(Exercise) %>%
+mutate(weight = sum(n) / (2 * n)) %>%
+deframe()
+
+# train binary model
+rf_bin <- randomForest(
+Exercise ~ .,
+data = train_bin,
+ntree = 100,
+classwt = bin_weights
+)
+
+bin_prob <- predict(rf_bin, test_bin, type = "prob")[,2]
+roc_curve <- roc(test_bin$Exercise, bin_prob)
+
+plot(roc_curve, main = "ROC Curve — Exercise vs Non-Exercise")
+auc(roc_curve)
+```
+
+We find that the binary random forest model is highly predictive, with ROC AUC of 0.9968.
+
+### Sensor Location Comparison
+
+In the real world, consumers are unlikely to wear multiple sensors. In this section, we will attempt to answer the question: "Where should one wear the sensor for best activity predictive performance?". Let's train models using only chest, ankle, or wrist-collected variables and compare performance.
+
+```{r sensor_location_models}
+# IMPORTANT:
+# We previously created body_temp for global models, but for location-specific
+# models we must retain and use the *location-specific temperature sensor*.
+# This block constructs fair single-location datasets that include:
+#   - inertial sensors from that location
+#   - the corresponding temperature sensor
+#   - scaled heart rate (global)
+
+make_location_df <- function(prefix, temp_var) {
+  vars <- c(
+    "activityID",
+    "scaled_hr",
+    "PeopleId",
+    temp_var,
+    grep(paste0("^", prefix, "\\."), names(df), value = TRUE)
+  )
+  df[, unique(vars)]
+}
+
+df_hand  <- make_location_df("hand",  "hand.temperature...C.")
+df_chest <- make_location_df("chest", "chest.temperature...C.")
+df_ankle <- make_location_df("ankle", "ankle.temperature...C.")
+
+fit_sensor_rf <- function(d) {
+  d$activityID <- as.factor(d$activityID)
+
+  idx <- sample(nrow(d), n)
+  train <- d[idx, ] %>% select(-PeopleId)
+  test  <- d[-idx, ] %>% sample_n(n) %>% select(-PeopleId)
+
+  cw <- train %>%
+    count(activityID) %>%
+    mutate(weight = sum(n) / (length(n) * n)) %>%
+    deframe()
+
+  rf <- randomForest(
+    activityID ~ .,
+    data = train,
+    ntree = 100,
+    classwt = cw
+  )
+
+  confusionMatrix(predict(rf, test), test$activityID)
+}
+
+fit_sensor_rf(df_hand)
+fit_sensor_rf(df_chest)
+fit_sensor_rf(df_ankle)
+```
+
+We conclude that wearing the sensor on one's wrist or chest can yield superior activity prediction compared to wearing the sensor on one's ankle based on the results above. All three models remain highly predictive, with 95+% accuracy, so that is encouraging for consumers who do not want to wear multiple sensors.
+
+### Conclusions and Future Work
+
+We find that random forest classifiers have a great deal of predictive power for activity classification based on these data. This is an exciting finding and it matches our personal experience with WHOOP, which is subjectively quite good at identifying different deliberate-exercise activities performed in daily life. There are two main areas from which we expect future improvements to stem. One is tuning model hyperparameters and increasing computing power behind the models. Only the default number of variables to consider at each split was implemented (mtry=$\sqrt{p}$). Additionally, we were only able to train random forest classifiers with 100 trees, which is below the default 500. Increasing the number of trees led to runtime difficulties. Another area for future improvement would be to leverage the time-series nature of these data. One could imagine training a model biased towards continuing to predict the same class of activity (as it moves through time), so that only a significant shift in the predictors would cause it to re-assess which activity is being performed. This tracks more closely with our experience of activities on a human timescale. We are not biking one moment and rope jumping the next! Therefore if the model predicts that we are biking for several small time chunks in a row, and then predicts rope jumping for a few time chunks before returning to predicting biking, it has likely made an error.
+
+Although our models did not perform better when simply predicting exercise vs. non-exercise, we assert that this remains a valuable future direction for exploration. If a client wanted a model, for example, that only predicts an activity when they are highly confident a wearer is engaged in exercise (perhaps they don't want to bother the wearer with too many notifications), then they could leverage a 2-step approach in which they first predict whether the user is exercising, and then predict which activity is being performed only if the likelihood of exercise clears some higher threshold. It is worth noting that the model we designed to distinguish between 7 classes still included a 'transient activity' class prediction. There would be no need to include this class under the 2-step approach proposed. It would be interesting to examine how the model would perform if it were only to distinguish between different types of deliberate exercise.
+
+With such encouraging results from our physical activity prediction, we are also curious about other potential applications of wearable sensors. Professors and graduate students in the USC mathematics department, including Professor Goldstein, have previously investigated an application of wearable sensor technology to blood alcohol content (BAC) prediction using only data available at the skin surface. Another potential application could be in the field of emergency response. For example, if a wearable sensor on an aging parent were able to accurately detect that they had been sitting or lying down for an extended period of time, that might trigger a series of notifications, possibly including to family members, before resulting in a call to emergency response services.
+
+To summarize:
+-Random forests dominate linear models on this task
+-High accuracy is achievable with minimal feature engineering
+-Sensor placement matters little; multiple locations are not required
+-Binary exercise detection could lead to desirable product enhancements
+-Temporal smoothing and hyperparameter tuning could enhance predictive power
+-Participant-aware training is another avenue for future investigation
+
+### Repository Notes
+-Dataset CSV file available at https://www.kaggle.com/datasets/diegosilvadefrana/fisical-activity-dataset/data
+-Code assumes dataset2.csv in project root
+-Results reproducible with set.seed(1)
